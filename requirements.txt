@@ -2,5 +2,6 @@ importlib_metadata
 mapomatic==0.6
 mthree==0.24
 pylatexenc
+qiskit
 qiskit-aer
 qiskit-ibm-runtime

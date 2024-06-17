@@ -1,15 +1,3 @@
-# This code is part of Qiskit.
-#
-# (C) Copyright IBM 2021, 2022.
-#
-# This code is licensed under the Apache License, Version 2.0. You may
-# obtain a copy of this license in the LICENSE.txt file in the root directory
-# of this source tree or at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# Any modifications or derivative works of this code must retain this
-# copyright notice, and modified files need to carry a notice indicating
-# that they have been altered from the originals.
-
 """The matrix functional of the vector solution to the linear systems."""
 
 from typing import Union, List
@@ -17,58 +5,13 @@ import numpy as np
 from scipy.sparse import diags
 
 from qiskit import QuantumCircuit
-from qiskit.quantum_info import Statevector
-from qiskit.opflow import I, Z, TensoredOp
+from qiskit.quantum_info import Statevector, Pauli, SparsePauliOp
+from qiskit.primitives import Estimator
 
 from .linear_system_observable import LinearSystemObservable
 
 
 class MatrixFunctional(LinearSystemObservable):
-    """A class for the matrix functional of the vector solution to the linear systems.
-
-    Examples:
-
-        .. jupyter-execute::
-
-            import numpy as np
-            from qiskit import QuantumCircuit
-            from quantum_linear_solvers.linear_solvers.observables.matrix_functional import \
-            MatrixFunctional
-            from qiskit.transpiler.passes import RemoveResetInZeroState
-            from qiskit.opflow import StateFn
-
-            tpass = RemoveResetInZeroState()
-
-            vector = [1.0, -2.1, 3.2, -4.3]
-            observable = MatrixFunctional(1, -1 / 3)
-
-            init_state = vector / np.linalg.norm(vector)
-            num_qubits = int(np.log2(len(vector)))
-
-            # Get observable circuits
-            obs_circuits = observable.observable_circuit(num_qubits)
-            qcs = []
-            for obs_circ in obs_circuits:
-                qc = QuantumCircuit(num_qubits)
-                qc.isometry(init_state, list(range(num_qubits)), None)
-                qc.append(obs_circ, list(range(num_qubits)))
-                qcs.append(tpass(qc.decompose()))
-
-            # Get observables
-            observable_ops = observable.observable(num_qubits)
-            state_vecs = []
-            # First is the norm
-            state_vecs.append((~StateFn(observable_ops[0]) @ StateFn(qcs[0])).eval())
-            for i in range(1, len(observable_ops), 2):
-                state_vecs += [(~StateFn(observable_ops[i]) @ StateFn(qcs[i])).eval(),
-                               (~StateFn(observable_ops[i + 1]) @ StateFn(qcs[i + 1])).eval()]
-
-            # Obtain result
-            result = observable.post_processing(state_vecs, num_qubits)
-
-            # Obtain analytical evaluation
-            exact = observable.evaluate_classically(init_state)
-    """
 
     def __init__(self, main_diag: float, off_diag: float) -> None:
         """
@@ -81,7 +24,7 @@ class MatrixFunctional(LinearSystemObservable):
         self._main_diag = main_diag
         self._off_diag = off_diag
 
-    def observable(self, num_qubits: int) -> Union[TensoredOp, List[TensoredOp]]:
+    def observable(self, num_qubits: int) -> Union[SparsePauliOp, List[SparsePauliOp]]:
         """The observable operators.
 
         Args:
@@ -90,23 +33,24 @@ class MatrixFunctional(LinearSystemObservable):
         Returns:
             The observable as a list of sums of Pauli strings.
         """
-        zero_op = (I + Z) / 2
-        one_op = (I - Z) / 2
+        zero_op = (Pauli('I') + Pauli('Z')) / 2
+        one_op = (Pauli('I') - Pauli('Z')) / 2
         observables = []
         # First we measure the norm of x
-        observables.append(I ^ num_qubits)
+        observables.append(SparsePauliOp.from_list([("I" * num_qubits, 1.0)]))
         for i in range(num_qubits):
             j = num_qubits - i - 1
 
-            # TODO this if can be removed once the bug in Opflow is fixed where
-            # TensoredOp([X, TensoredOp([])]).eval() ends up in infinite recursion
             if i > 0:
                 observables += [
-                    (I ^ j) ^ zero_op ^ TensoredOp(i * [one_op]),
-                    (I ^ j) ^ one_op ^ TensoredOp(i * [one_op]),
+                    SparsePauliOp.from_list([("I" * j + "Z" + "I" * i, 1.0)]),
+                    SparsePauliOp.from_list([("I" * j + "Z" + "I" * i, -1.0)])
                 ]
             else:
-                observables += [(I ^ j) ^ zero_op, (I ^ j) ^ one_op]
+                observables += [
+                    SparsePauliOp.from_list([("I" * j + "Z", 1.0)]),
+                    SparsePauliOp.from_list([("I" * j + "Z", -1.0)])
+                ]
 
         return observables
 
